@@ -57,3 +57,111 @@ Open:
 - `member`
   - View projects they belong to
   - Update status only for tasks assigned to them
+
+## Deploy on Railway
+
+This repo is best deployed to Railway as an isolated monorepo with two separate services:
+
+- `backend` for the Express API
+- `frontend` for the React + Vite app
+
+### 1. Push the repo to GitHub
+
+Railway works best when both services are connected to the same GitHub repository.
+
+### 2. Create two Railway services
+
+Inside one Railway project, create:
+
+- one service for `frontend`
+- one service for `backend`
+
+Then connect both services to the same GitHub repo.
+
+### 3. Set the root directory for each service
+
+In Railway service settings:
+
+- frontend root directory: `/frontend`
+- backend root directory: `/backend`
+
+### 4. Deploy the backend first
+
+Set these variables on the backend service:
+
+```env
+MONGO_URI=your_mongodb_atlas_connection_string
+JWT_SECRET=your_strong_secret
+JWT_EXPIRES_IN=7d
+NODE_ENV=production
+CLIENT_URL=https://your-frontend-domain.up.railway.app
+```
+
+After the first backend deploy, generate a public domain for the backend service.
+
+Your API will be available at:
+
+```text
+https://your-backend-domain.up.railway.app/api
+```
+
+Health check:
+
+```text
+https://your-backend-domain.up.railway.app/api/health
+```
+
+### 5. Deploy the frontend
+
+Set this variable on the frontend service:
+
+```env
+VITE_API_BASE_URL=https://your-backend-domain.up.railway.app/api
+```
+
+Then deploy the frontend and generate its public domain.
+
+### 6. Update backend CORS if the frontend domain changes
+
+If Railway gives you a different frontend domain, update:
+
+```env
+CLIENT_URL=https://your-new-frontend-domain.up.railway.app
+```
+
+and redeploy the backend.
+
+### 7. Optional: use Railway reference variables
+
+Railway supports service-to-service variable references. If your services are named exactly `frontend` and `backend`, you can use:
+
+Backend:
+
+```env
+CLIENT_URL=https://${{frontend.RAILWAY_PUBLIC_DOMAIN}}
+```
+
+Frontend:
+
+```env
+VITE_API_BASE_URL=https://${{backend.RAILWAY_PUBLIC_DOMAIN}}/api
+```
+
+If your Railway service names are different, replace `frontend` and `backend` with the exact service names.
+
+### Recommended Railway settings
+
+- Backend start command: `npm start`
+- Frontend build command: `npm run build`
+- Frontend start command: `npm start`
+- Keep watch paths scoped to each service directory if you want cleaner monorepo deploys
+
+### Deployment order
+
+1. Deploy backend
+2. Generate backend domain
+3. Set `VITE_API_BASE_URL` on frontend
+4. Deploy frontend
+5. Generate frontend domain
+6. Set `CLIENT_URL` on backend
+7. Redeploy backend
