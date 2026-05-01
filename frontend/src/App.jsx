@@ -142,6 +142,10 @@ const normalizeTask = (task = {}) => ({
   dueDate: task.dueDate || new Date().toISOString(),
   isOverdue: Boolean(task.isOverdue),
   priority: task.priority || task.suggestedPriority || "medium",
+  progressPercent: Math.min(
+    100,
+    Math.max(0, Number.isFinite(Number(task.progressPercent)) ? Number(task.progressPercent) : 0)
+  ),
   riskLevel: task.riskLevel || "low",
   status: normalizeStatus(task.status),
   suggestedPriority: task.suggestedPriority || task.priority || "medium",
@@ -718,6 +722,21 @@ function App() {
     }
   };
 
+  const handleProgressChange = async (taskId, progressPercent) => {
+    try {
+      const data = await request(`/tasks/${taskId}`, {
+        method: "PATCH",
+        token,
+        body: { progressPercent },
+      });
+
+      await refreshWorkspace(token, selectedProjectId);
+      pushToast(`Progress updated to ${data.task?.progressPercent ?? progressPercent}%.`);
+    } catch (error) {
+      pushToast(error.message, "error");
+    }
+  };
+
   const handleDeleteTask = async (taskId) => {
     if (!window.confirm("Delete this task?")) {
       return;
@@ -958,6 +977,7 @@ function App() {
                 onMemberInput={handleMemberInput}
                 onProjectInput={handleProjectInput}
                 onProjectSettingsInput={handleProjectSettingsInput}
+                onProgressChange={handleProgressChange}
                 onRemoveMember={handleRemoveMember}
                 onSelectProject={handleProjectSelect}
                 onStatusChange={handleStatusChange}

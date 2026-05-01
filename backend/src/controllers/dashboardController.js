@@ -11,6 +11,18 @@ const {
   toPercent,
 } = require("../utils/taskInsights");
 
+const resolveAssignedUserId = (task) => {
+  if (!task?.assignedTo) {
+    return null;
+  }
+
+  if (task.assignedTo._id) {
+    return task.assignedTo._id.toString();
+  }
+
+  return task.assignedTo.toString();
+};
+
 const getDashboard = async (req, res, next) => {
   try {
     const projects = await Project.find({ "members.user": req.user._id }).populate(
@@ -24,18 +36,24 @@ const getDashboard = async (req, res, next) => {
       .populate("assignedTo", "name email")
       .populate("createdBy", "name email")
       .sort({ dueDate: 1, createdAt: -1 });
-
-    const myTasks = tasks.filter(
-      (task) => task.assignedTo && task.assignedTo._id.toString() === req.user._id.toString()
-    );
-    const myOverdueTasks = myTasks.filter((task) => isTaskOverdue(task));
-    const overallSummary = buildTaskSummary(tasks);
-    const mySummary = buildTaskSummary(myTasks);
+    const roleByProject = new Map();
     const memberMap = new Map();
     const tasksByProject = new Map();
+    const visibleTaskIds = new Set();
 
     projects.forEach((project) => {
+      const myMemberEntry = project.members.find(
+        (member) => member.user._id.toString() === req.user._id.toString()
+      );
+      const myRole = myMemberEntry?.role || "member";
+
+      roleByProject.set(project._id.toString(), myRole);
+
       project.members.forEach((member) => {
+        if (myRole !== "admin" && member.user._id.toString() !== req.user._id.toString()) {
+          return;
+        }
+
         const key = member.user._id.toString();
 
         if (!memberMap.has(key)) {
@@ -53,18 +71,30 @@ const getDashboard = async (req, res, next) => {
 
     tasks.forEach((task) => {
       const key = task.project._id.toString();
+      const projectRole = roleByProject.get(key) || "member";
+      const isVisible =
+        projectRole === "admin" || resolveAssignedUserId(task) === req.user._id.toString();
 
       if (!tasksByProject.has(key)) {
         tasksByProject.set(key, []);
       }
 
-      tasksByProject.get(key).push(task);
+      if (isVisible) {
+        tasksByProject.get(key).push(task);
+        visibleTaskIds.add(task._id.toString());
+      }
     });
+
+    const visibleTasks = Array.from(tasksByProject.values()).flat();
+    const myTasks = visibleTasks.filter((task) => resolveAssignedUserId(task) === req.user._id.toString());
+    const myOverdueTasks = myTasks.filter((task) => isTaskOverdue(task));
+    const overallSummary = buildTaskSummary(visibleTasks);
+    const mySummary = buildTaskSummary(myTasks);
 
     const memberAnalytics = Array.from(memberMap.values())
       .map((member) => {
-        const assignedTasks = tasks.filter(
-          (task) => task.assignedTo && task.assignedTo._id.toString() === member.id.toString()
+        const assignedTasks = visibleTasks.filter(
+          (task) => resolveAssignedUserId(task) === member.id.toString()
         );
         const completedTasks = assignedTasks.filter((task) => isTaskCompleted(task.status)).length;
         const overdueTasks = assignedTasks.filter((task) => isTaskOverdue(task)).length;
@@ -103,6 +133,19 @@ const getDashboard = async (req, res, next) => {
       .populate("task", "title")
       .sort({ createdAt: -1 })
       .limit(12);
+    const scopedActivity = recentActivity.filter((item) => {
+      const projectRole = item.project?._id ? roleByProject.get(item.project._id.toString()) : "member";
+
+      if (projectRole === "admin") {
+        return true;
+      }
+
+      if (item.task?._id) {
+        return visibleTaskIds.has(item.task._id.toString());
+      }
+
+      return item.actor?._id?.toString() === req.user._id.toString();
+    });
 
     const busiestMember = memberAnalytics[0] || null;
     const delayedProject =
@@ -130,7 +173,7 @@ const getDashboard = async (req, res, next) => {
         busiestMember,
         delayedProject,
       },
-      recentActivity: recentActivity.map(serializeActivity),
+      recentActivity: scopedActivity.map(serializeActivity),
     });
   } catch (error) {
     next(error);

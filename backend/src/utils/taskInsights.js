@@ -14,6 +14,20 @@ const normalizeTaskStatus = (status) => {
 
 const isTaskCompleted = (status) => normalizeTaskStatus(status) === "completed";
 
+const normalizeProgressPercent = (value, status = "todo") => {
+  if (isTaskCompleted(status)) {
+    return 100;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+
+  return Math.min(100, Math.max(0, Math.round(parsed)));
+};
+
 const isTaskOverdue = (task) => !isTaskCompleted(task.status) && new Date(task.dueDate) < new Date();
 
 const getRiskLevel = (dueDate, status) => {
@@ -79,6 +93,7 @@ const serializeTask = (task) => ({
   description: task.description,
   status: normalizeTaskStatus(task.status),
   priority: task.priority,
+  progressPercent: normalizeProgressPercent(task.progressPercent, task.status),
   dueDate: task.dueDate,
   isOverdue: isTaskOverdue(task),
   riskLevel: getRiskLevel(task.dueDate, task.status),
@@ -227,6 +242,7 @@ module.exports = {
   isTaskCompleted,
   isTaskOverdue,
   normalizeTaskStatus,
+  normalizeProgressPercent,
   serializeActivity,
   serializeTask,
   toPercent,

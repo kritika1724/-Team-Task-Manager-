@@ -47,6 +47,7 @@ function ProjectsView({
   onMemberInput,
   onProjectInput,
   onProjectSettingsInput,
+  onProgressChange,
   onRemoveMember,
   onSelectProject,
   onStatusChange,
@@ -67,6 +68,7 @@ function ProjectsView({
     status: "all",
   });
   const [memberEdits, setMemberEdits] = useState({});
+  const [taskProgressDrafts, setTaskProgressDrafts] = useState({});
 
   const canManageProject = projectDetail?.role === "admin";
   const summary = projectDetail?.summary || {
@@ -97,6 +99,17 @@ function ProjectsView({
 
     setMemberEdits(nextEdits);
   }, [members]);
+
+  useEffect(() => {
+    const nextDrafts = {};
+
+    tasks.forEach((task) => {
+      nextDrafts[task.id] = String(task.progressPercent ?? 0);
+    });
+
+    setTaskProgressDrafts(nextDrafts);
+  }, [tasks]);
+
   const filteredTasks = tasks.filter((task) => {
     if (filters.status !== "all" && task.status !== filters.status) {
       return false;
@@ -132,6 +145,15 @@ function ProjectsView({
         ...(current[memberId] || {}),
         roleOption: value,
       },
+    }));
+  };
+
+  const handleProgressDraftChange = (taskId, value) => {
+    const nextValue = String(Math.min(100, Math.max(0, Number(value) || 0)));
+
+    setTaskProgressDrafts((current) => ({
+      ...current,
+      [taskId]: nextValue,
     }));
   };
 
@@ -211,7 +233,7 @@ function ProjectsView({
                   <p className="section-note">
                     {canManageProject
                       ? "Admins can edit the project, manage team members, assign tasks, and delete tasks."
-                      : "Members can view project work and update status only on tasks assigned to them."}
+                      : "Members can only see tasks assigned to them and can update both status and progress."}
                   </p>
                 </div>
                 <span className="role-pill">{projectDetail.displayRole || projectDetail.role}</span>
@@ -452,7 +474,7 @@ function ProjectsView({
                       <p className="subtle helper-copy">
                         {canManageProject
                           ? "Set task owner, description, deadline, and priority in one place."
-                          : "Members can update status on assigned tasks. Admins control assignment and deletion."}
+                          : "Members only see their own assigned tasks here and can update both status and completion progress."}
                       </p>
                     </div>
                   </div>
@@ -511,7 +533,7 @@ function ProjectsView({
                     </form>
                   ) : (
                     <div className="empty-inline">
-                      <p>Use the task board below to update status on the tasks assigned to you.</p>
+                      <p>Use the task board below to update status and completion progress on your tasks.</p>
                     </div>
                   )}
                 </article>
@@ -581,9 +603,11 @@ function ProjectsView({
                   <div className="card-header">
                     <div>
                       <p className="eyebrow">Task Board</p>
-                      <h4>All project tasks</h4>
+                      <h4>{canManageProject ? "All project tasks" : "Your assigned tasks"}</h4>
                       <p className="subtle helper-copy">
-                        Filter by status, priority, assignee, or overdue risk to inspect work quickly.
+                        {canManageProject
+                          ? "Filter by status, priority, assignee, or overdue risk to inspect work quickly."
+                          : "This list is scoped to your own tasks so members stay focused on their assigned work."}
                       </p>
                     </div>
                   </div>
@@ -607,17 +631,19 @@ function ProjectsView({
                         <option value="high">High</option>
                       </select>
                     </label>
-                    <label className="field">
-                      <span>Assigned member</span>
-                      <select name="assignedTo" onChange={handleFilterChange} value={filters.assignedTo}>
-                        <option value="all">All</option>
-                        {members.map((member) => (
-                          <option key={member.id} value={member.id}>
-                            {member.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    {canManageProject ? (
+                      <label className="field">
+                        <span>Assigned member</span>
+                        <select name="assignedTo" onChange={handleFilterChange} value={filters.assignedTo}>
+                          <option value="all">All</option>
+                          {members.map((member) => (
+                            <option key={member.id} value={member.id}>
+                              {member.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
                     <label className="field">
                       <span>Overdue</span>
                       <select name="overdue" onChange={handleFilterChange} value={filters.overdue}>
@@ -667,9 +693,17 @@ function ProjectsView({
                               <span className="meta-pill">
                                 Due: {new Date(task.dueDate).toLocaleDateString()}
                               </span>
+                              <span className="meta-pill">Progress: {task.progressPercent ?? 0}%</span>
                               <span className="meta-pill">
                                 Suggested: {formatDisplayLabel(task.suggestedPriority)}
                               </span>
+                            </div>
+
+                            <div className="progress-track task-progress-track">
+                              <span
+                                className="progress-fill"
+                                style={{ width: `${task.progressPercent ?? 0}%` }}
+                              ></span>
                             </div>
 
                             <div className="task-status-row">
@@ -685,6 +719,45 @@ function ProjectsView({
                                   <option value="completed">Completed</option>
                                 </select>
                               </label>
+
+                              <div className="field">
+                                <span>Completion progress</span>
+                                <div className="task-progress-editor">
+                                  <input
+                                    className="progress-slider"
+                                    disabled={!canUpdateStatus}
+                                    max="100"
+                                    min="0"
+                                    onChange={(event) => handleProgressDraftChange(task.id, event.target.value)}
+                                    step="5"
+                                    type="range"
+                                    value={taskProgressDrafts[task.id] ?? String(task.progressPercent ?? 0)}
+                                  />
+                                  <div className="task-progress-footer">
+                                    <strong>
+                                      {taskProgressDrafts[task.id] ?? String(task.progressPercent ?? 0)}%
+                                    </strong>
+                                    {canUpdateStatus ? (
+                                      <button
+                                        className="secondary-button compact-button"
+                                        disabled={
+                                          Number(taskProgressDrafts[task.id] ?? task.progressPercent ?? 0) ===
+                                          Number(task.progressPercent ?? 0)
+                                        }
+                                        onClick={() =>
+                                          onProgressChange(
+                                            task.id,
+                                            Number(taskProgressDrafts[task.id] ?? task.progressPercent ?? 0)
+                                          )
+                                        }
+                                        type="button"
+                                      >
+                                        Update progress
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           </article>
                         );

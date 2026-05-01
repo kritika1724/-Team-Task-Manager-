@@ -33,6 +33,27 @@ const serializeMember = (member) => ({
   displayRole: resolveProjectRoleTitle(member.role, member.roleTitle),
 });
 
+const resolveTaskAssigneeId = (task) => {
+  if (!task?.assignedTo) {
+    return null;
+  }
+
+  if (task.assignedTo._id) {
+    return task.assignedTo._id.toString();
+  }
+
+  return task.assignedTo.toString();
+};
+
+const getVisibleTasksForRole = (tasks, role, userId) => {
+  if (role === "admin") {
+    return tasks;
+  }
+
+  const userIdString = userId.toString();
+  return tasks.filter((task) => resolveTaskAssigneeId(task) === userIdString);
+};
+
 const ensureAdmin = (access, res, message) => {
   if (access.role === "admin") {
     return true;
@@ -85,7 +106,7 @@ const getProjects = async (req, res, next) => {
       .sort({ updatedAt: -1 });
 
     const projectIds = projects.map((project) => project._id);
-    const tasks = await Task.find({ project: { $in: projectIds } }, "project status dueDate");
+    const tasks = await Task.find({ project: { $in: projectIds } }, "project status dueDate assignedTo");
     const tasksByProject = new Map();
 
     tasks.forEach((task) => {
@@ -101,9 +122,13 @@ const getProjects = async (req, res, next) => {
     res.json({
       projects: projects.map((project) => {
         const projectTasks = tasksByProject.get(project._id.toString()) || [];
-        const summary = buildTaskSummary(projectTasks);
         const roleEntry = project.members.find(
           (member) => member.user._id.toString() === req.user._id.toString()
+        );
+        const visibleTasks = getVisibleTasksForRole(
+          projectTasks,
+          roleEntry?.role || "member",
+          req.user._id
         );
 
         return {
@@ -113,7 +138,7 @@ const getProjects = async (req, res, next) => {
           role: roleEntry?.role || "member",
           displayRole: resolveProjectRoleTitle(roleEntry?.role, roleEntry?.roleTitle),
           memberCount: project.members.length,
-          summary,
+          summary: buildTaskSummary(visibleTasks),
           updatedAt: project.updatedAt,
         };
       }),
@@ -181,6 +206,8 @@ const getProjectDetails = async (req, res, next) => {
       .populate("createdBy", "name email")
       .sort({ dueDate: 1, createdAt: -1 });
 
+    const visibleTasks = getVisibleTasksForRole(tasks, access.role, req.user._id);
+    const visibleTaskIds = new Set(visibleTasks.map((task) => task._id.toString()));
     const members = access.project.members.map(serializeMember);
     const recentActivity = await Activity.find({ project: access.project._id })
       .populate("actor", "name email")
@@ -188,6 +215,20 @@ const getProjectDetails = async (req, res, next) => {
       .populate("task", "title")
       .sort({ createdAt: -1 })
       .limit(12);
+    const scopedActivity =
+      access.role === "admin"
+        ? recentActivity
+        : recentActivity.filter((item) => {
+            if (item.task?._id) {
+              return visibleTaskIds.has(item.task._id.toString());
+            }
+
+            return item.actor?._id?.toString() === req.user._id.toString();
+          });
+    const analyticsMembers =
+      access.role === "admin"
+        ? members
+        : members.filter((member) => member.id.toString() === req.user._id.toString());
 
     res.json({
       project: {
@@ -199,10 +240,10 @@ const getProjectDetails = async (req, res, next) => {
         roleOptions: getProjectRoleOptions(access.project),
         customRoles: getNormalizedCustomRoles(access.project),
         members,
-        summary: buildTaskSummary(tasks),
-        memberAnalytics: buildMemberAnalytics(members, tasks),
-        recentActivity: recentActivity.map(serializeActivity),
-        tasks: tasks.map(serializeTask),
+        summary: buildTaskSummary(visibleTasks),
+        memberAnalytics: buildMemberAnalytics(analyticsMembers, visibleTasks),
+        recentActivity: scopedActivity.map(serializeActivity),
+        tasks: visibleTasks.map(serializeTask),
       },
     });
   } catch (error) {

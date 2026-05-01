@@ -39,6 +39,13 @@ const taskSchema = new mongoose.Schema(
       default: "medium",
       required: true,
     },
+    progressPercent: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: 0,
+      required: true,
+    },
     dueDate: {
       type: Date,
       required: true,

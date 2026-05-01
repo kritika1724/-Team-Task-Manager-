@@ -5,6 +5,7 @@ const { logActivity } = require("../services/activityService");
 const { getProjectRole } = require("../utils/projectAccess");
 const {
   getSuggestedPriority,
+  normalizeProgressPercent,
   serializeTask,
 } = require("../utils/taskInsights");
 
@@ -22,6 +23,42 @@ const resolveIncomingStatus = (status) => {
   }
 
   return null;
+};
+
+const resolveTaskState = (task, statusChanged, progressChanged) => {
+  if (task.status === "completed") {
+    task.progressPercent = 100;
+    return;
+  }
+
+  if (progressChanged) {
+    if (task.progressPercent <= 0) {
+      task.progressPercent = 0;
+      task.status = "todo";
+      return;
+    }
+
+    if (task.progressPercent >= 100) {
+      task.progressPercent = 100;
+      task.status = "completed";
+      return;
+    }
+
+    if (!statusChanged || task.status === "todo") {
+      task.status = "in_progress";
+    }
+
+    return;
+  }
+
+  if (statusChanged && task.status === "todo") {
+    task.progressPercent = 0;
+    return;
+  }
+
+  if (statusChanged && task.status === "in_progress" && task.progressPercent >= 100) {
+    task.progressPercent = 75;
+  }
 };
 
 const createTask = async (req, res, next) => {
@@ -91,6 +128,7 @@ const createTask = async (req, res, next) => {
       assignedTo,
       createdBy: req.user._id,
       priority: finalPriority,
+      progressPercent: 0,
       dueDate: parsedDueDate,
       status: "todo",
     });
@@ -155,8 +193,12 @@ const updateTask = async (req, res, next) => {
       });
     }
 
-    const { title, description, assignedTo, priority, dueDate, status } = req.body;
+    const { title, description, assignedTo, priority, dueDate, status, progressPercent } = req.body;
     const activityMessages = [];
+    let statusChanged = false;
+    let progressChanged = false;
+    const previousStatus = task.status;
+    const previousProgress = normalizeProgressPercent(task.progressPercent, task.status);
 
     if (role === "admin") {
       if (typeof title === "string" && title.trim() && task.title !== title.trim()) {
@@ -218,8 +260,37 @@ const updateTask = async (req, res, next) => {
 
       if (task.status !== normalizedStatus) {
         task.status = normalizedStatus;
+        statusChanged = true;
         activityMessages.push(`changed status to ${normalizedStatus.replace("_", " ")}`);
       }
+    }
+
+    if (typeof progressPercent !== "undefined") {
+      const normalizedProgress = normalizeProgressPercent(progressPercent, status || task.status);
+
+      if (!Number.isFinite(Number(progressPercent))) {
+        res.status(400);
+        throw new Error("Progress must be a number between 0 and 100.");
+      }
+
+      if (task.progressPercent !== normalizedProgress) {
+        task.progressPercent = normalizedProgress;
+        progressChanged = true;
+        activityMessages.push(`updated progress to ${normalizedProgress}%`);
+      }
+    }
+
+    resolveTaskState(task, statusChanged, progressChanged);
+
+    if (task.status !== previousStatus && !statusChanged) {
+      activityMessages.push(`changed status to ${task.status.replace("_", " ")}`);
+    }
+
+    if (
+      normalizeProgressPercent(task.progressPercent, task.status) !== previousProgress &&
+      !progressChanged
+    ) {
+      activityMessages.push(`updated progress to ${normalizeProgressPercent(task.progressPercent, task.status)}%`);
     }
 
     await task.save();

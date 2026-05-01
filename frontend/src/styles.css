@@ -1175,7 +1175,51 @@ textarea {
 }
 
 .task-status-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
   margin-top: 14px;
+}
+
+.task-progress-track {
+  margin-top: 14px;
+}
+
+.task-progress-editor {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.035);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.progress-slider {
+  width: 100%;
+  accent-color: var(--accent);
+  padding: 0;
+  box-shadow: none;
+}
+
+.progress-slider:focus {
+  box-shadow: none;
+}
+
+.task-progress-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.task-progress-footer strong {
+  font-size: 0.95rem;
+}
+
+.compact-button {
+  padding: 10px 14px;
+  border-radius: 14px;
 }
 
 .risk-pill {
