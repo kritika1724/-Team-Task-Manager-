@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 function ProjectCard({ project, isActive, onSelect }) {
   return (
@@ -8,7 +8,7 @@ function ProjectCard({ project, isActive, onSelect }) {
           <h4>{project.name}</h4>
           <p className="subtle">{project.description || "No description yet"}</p>
         </div>
-        <span className="role-pill">{project.role}</span>
+        <span className="role-pill">{project.displayRole || project.role}</span>
       </div>
       <div className="project-card-meta">
         <span>{project.memberCount} members</span>
@@ -22,6 +22,9 @@ function ProjectCard({ project, isActive, onSelect }) {
 const formatDisplayLabel = (value) =>
   value.replace("_", " ").replace(/\b\w/g, (character) => character.toUpperCase());
 
+const createRoleOptionValue = (role = "member", roleTitle = "") =>
+  `${role === "admin" ? "admin" : "member"}|${(roleTitle || "").trim()}`;
+
 const formatActivityTime = (value) =>
   new Date(value).toLocaleString([], {
     day: "numeric",
@@ -31,11 +34,14 @@ const formatActivityTime = (value) =>
   });
 
 function ProjectsView({
+  customRoleForm,
   currentUserId,
   memberForm,
   onAddMember,
+  onCreateCustomRole,
   onCreateProject,
   onCreateTask,
+  onCustomRoleInput,
   onDeleteProject,
   onDeleteTask,
   onMemberInput,
@@ -45,6 +51,7 @@ function ProjectsView({
   onSelectProject,
   onStatusChange,
   onTaskInput,
+  onUpdateMember,
   onUpdateProject,
   projectDetail,
   projectForm,
@@ -59,6 +66,7 @@ function ProjectsView({
     priority: "all",
     status: "all",
   });
+  const [memberEdits, setMemberEdits] = useState({});
 
   const canManageProject = projectDetail?.role === "admin";
   const summary = projectDetail?.summary || {
@@ -72,6 +80,23 @@ function ProjectsView({
   const memberAnalytics = projectDetail?.memberAnalytics || [];
   const recentActivity = projectDetail?.recentActivity || [];
   const tasks = projectDetail?.tasks || [];
+  const projectRoleOptions = projectDetail?.roleOptions || [
+    { label: "Admin", permissionRole: "admin", roleTitle: "", value: "admin|" },
+    { label: "Member", permissionRole: "member", roleTitle: "", value: "member|" },
+  ];
+  const customRoleEntries = projectDetail?.customRoles || [];
+
+  useEffect(() => {
+    const nextEdits = {};
+
+    members.forEach((member) => {
+      nextEdits[member.id] = {
+        roleOption: createRoleOptionValue(member.role, member.roleTitle),
+      };
+    });
+
+    setMemberEdits(nextEdits);
+  }, [members]);
   const filteredTasks = tasks.filter((task) => {
     if (filters.status !== "all" && task.status !== filters.status) {
       return false;
@@ -97,6 +122,16 @@ function ProjectsView({
     setFilters((current) => ({
       ...current,
       [name]: value,
+    }));
+  };
+
+  const handleMemberEditChange = (memberId, value) => {
+    setMemberEdits((current) => ({
+      ...current,
+      [memberId]: {
+        ...(current[memberId] || {}),
+        roleOption: value,
+      },
     }));
   };
 
@@ -179,7 +214,7 @@ function ProjectsView({
                       : "Members can view project work and update status only on tasks assigned to them."}
                   </p>
                 </div>
-                <span className="role-pill">{projectDetail.role}</span>
+                <span className="role-pill">{projectDetail.displayRole || projectDetail.role}</span>
               </div>
 
               <div className="detail-summary-grid detail-summary-grid-expanded">
@@ -216,50 +251,151 @@ function ProjectsView({
 
                   <div className="member-list">
                     {members.map((member) => (
-                      <div className="member-row member-row-compact" key={member.id}>
-                        <div>
-                          <strong>{member.name}</strong>
-                          <p className="subtle">{member.email}</p>
+                      <article className="member-card" key={member.id}>
+                        <div className="member-row member-row-compact">
+                          <div>
+                            <strong>{member.name}</strong>
+                            <p className="subtle">{member.email}</p>
+                          </div>
+
+                          <div className="member-actions">
+                            <span className="meta-pill">{member.displayRole || member.role}</span>
+                            <span className="meta-pill">
+                              {member.role === "admin" ? "Admin access" : "Member access"}
+                            </span>
+                            {canManageProject && member.id !== currentUserId ? (
+                              <button
+                                className="text-button danger-text-button"
+                                onClick={() => onRemoveMember(member.id)}
+                                type="button"
+                              >
+                                Remove
+                              </button>
+                            ) : null}
+                          </div>
                         </div>
 
-                        <div className="member-actions">
-                          <span className="meta-pill">{member.role}</span>
-                          {canManageProject && member.id !== currentUserId ? (
+                        {canManageProject ? (
+                          <div className="member-role-editor">
+                            <label className="field compact-field">
+                              <span>Role</span>
+                              <select
+                                name="roleOption"
+                                onChange={(event) => handleMemberEditChange(member.id, event.target.value)}
+                                value={
+                                  memberEdits[member.id]?.roleOption ||
+                                  createRoleOptionValue(member.role, member.roleTitle)
+                                }
+                              >
+                                {projectRoleOptions.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
                             <button
-                              className="text-button danger-text-button"
-                              onClick={() => onRemoveMember(member.id)}
+                              className="secondary-button"
+                              onClick={() => onUpdateMember(member.id, memberEdits[member.id])}
                               type="button"
                             >
-                              Remove
+                              Save Role
                             </button>
-                          ) : null}
-                        </div>
-                      </div>
+                          </div>
+                        ) : null}
+                      </article>
                     ))}
                   </div>
 
                   {canManageProject ? (
-                    <form className="stack-form top-gap" onSubmit={onAddMember}>
-                      <label className="field">
-                        <span>Add member by email</span>
-                        <input
-                          name="email"
-                          onChange={onMemberInput}
-                          placeholder="member@example.com"
-                          value={memberForm.email}
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Role</span>
-                        <select name="role" onChange={onMemberInput} value={memberForm.role}>
-                          <option value="member">Member</option>
-                          <option value="admin">Admin</option>
-                        </select>
-                      </label>
-                      <button className="secondary-button" type="submit">
-                        Add Member
-                      </button>
-                    </form>
+                    <>
+                      <div className="role-library top-gap">
+                        <p className="guide-title">Custom project roles</p>
+                        <p className="subtle helper-copy">
+                          Create roles like Designer, QA Lead, or Project Manager and choose
+                          whether they behave like admin access or member access.
+                        </p>
+
+                        <div className="inline-role-list">
+                          {projectRoleOptions.map((option) => (
+                            <span className="meta-pill" key={option.value}>
+                              {option.label}
+                            </span>
+                          ))}
+                        </div>
+
+                        <form className="inline-form top-gap" onSubmit={onCreateCustomRole}>
+                          <label className="field">
+                            <span>New custom role</span>
+                            <input
+                              name="name"
+                              onChange={onCustomRoleInput}
+                              placeholder="Designer"
+                              value={customRoleForm.name}
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Permission base</span>
+                            <select
+                              name="permissionRole"
+                              onChange={onCustomRoleInput}
+                              value={customRoleForm.permissionRole}
+                            >
+                              <option value="member">Member access</option>
+                              <option value="admin">Admin access</option>
+                            </select>
+                          </label>
+                          <button className="secondary-button" type="submit">
+                            Add Role
+                          </button>
+                        </form>
+
+                        {customRoleEntries.length > 0 ? (
+                          <div className="data-list top-gap">
+                            {customRoleEntries.map((roleEntry) => (
+                              <article className="data-row-card" key={`${roleEntry.name}-${roleEntry.permissionRole}`}>
+                                <div className="data-row-header">
+                                  <div>
+                                    <strong>{roleEntry.name}</strong>
+                                    <p className="subtle">
+                                      {roleEntry.permissionRole === "admin"
+                                        ? "Admin access"
+                                        : "Member access"}
+                                    </p>
+                                  </div>
+                                </div>
+                              </article>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <form className="stack-form top-gap" onSubmit={onAddMember}>
+                        <label className="field">
+                          <span>Add member by email</span>
+                          <input
+                            name="email"
+                            onChange={onMemberInput}
+                            placeholder="member@example.com"
+                            value={memberForm.email}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Access level</span>
+                          <select name="roleOption" onChange={onMemberInput} value={memberForm.roleOption}>
+                            {projectRoleOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <button className="secondary-button" type="submit">
+                          Add Member
+                        </button>
+                      </form>
+                    </>
                   ) : null}
                 </article>
 
@@ -339,7 +475,7 @@ function ProjectsView({
                             <option value="">Select member</option>
                             {members.map((member) => (
                               <option key={member.id} value={member.id}>
-                                {member.name} ({member.role})
+                                {member.name} ({member.displayRole || member.role})
                               </option>
                             ))}
                           </select>
@@ -395,11 +531,11 @@ function ProjectsView({
                       </div>
                     ) : (
                       memberAnalytics.map((member) => (
-                        <article className="data-row-card" key={member.id}>
+                            <article className="data-row-card" key={member.id}>
                           <div className="data-row-header">
                             <div>
                               <strong>{member.name}</strong>
-                              <p className="subtle">{member.role}</p>
+                              <p className="subtle">{member.displayRole || member.role}</p>
                             </div>
                             <span className="meta-pill">{member.completionRate}%</span>
                           </div>

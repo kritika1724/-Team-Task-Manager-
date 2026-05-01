@@ -13,6 +13,11 @@ const projectMemberSchema = new mongoose.Schema(
       default: "member",
       required: true,
     },
+    roleTitle: {
+      type: String,
+      default: "",
+      trim: true,
+    },
   },
   {
     _id: false,
@@ -41,6 +46,10 @@ const projectSchema = new mongoose.Schema(
       type: [projectMemberSchema],
       default: [],
     },
+    customRoles: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: [],
+    },
   },
   {
     timestamps: true,
@@ -50,4 +59,3 @@ const projectSchema = new mongoose.Schema(
 projectSchema.index({ "members.user": 1 });
 
 module.exports = mongoose.model("Project", projectSchema);
-

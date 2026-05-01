@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const Project = require("../models/Project");
+const { resolveProjectRoleTitle } = require("./projectRoles");
 
 const resolveMemberUserId = (member) => {
   if (!member?.user) {
@@ -19,6 +20,11 @@ const getProjectRole = (project, userId) => {
   return member?.role || null;
 };
 
+const getProjectMemberEntry = (project, userId) => {
+  const userIdString = userId.toString();
+  return project.members.find((entry) => resolveMemberUserId(entry) === userIdString) || null;
+};
+
 const getProjectForUser = async (projectId, userId) => {
   if (!mongoose.Types.ObjectId.isValid(projectId)) {
     return null;
@@ -30,16 +36,24 @@ const getProjectForUser = async (projectId, userId) => {
     return null;
   }
 
-  const role = getProjectRole(project, userId);
+  const member = getProjectMemberEntry(project, userId);
+  const role = member?.role || null;
 
   if (!role) {
     return null;
   }
 
-  return { project, role };
+  return {
+    project,
+    role,
+    roleTitle: member?.roleTitle || "",
+    displayRole: resolveProjectRoleTitle(member?.role, member?.roleTitle),
+    member,
+  };
 };
 
 module.exports = {
+  getProjectMemberEntry,
   getProjectRole,
   getProjectForUser,
 };

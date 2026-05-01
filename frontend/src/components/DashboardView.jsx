@@ -71,7 +71,7 @@ function MemberAnalyticsPanel({ members }) {
               <div className="data-row-header">
                 <div>
                   <strong>{member.name}</strong>
-                  <p className="subtle">{member.role}</p>
+                  <p className="subtle">{member.displayRole || member.role}</p>
                 </div>
                 <span className="meta-pill">{member.completionRate}% complete</span>
               </div>

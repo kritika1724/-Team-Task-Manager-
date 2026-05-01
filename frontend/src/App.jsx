@@ -62,7 +62,7 @@ const emptyProjectForm = {
 
 const emptyMemberForm = {
   email: "",
-  role: "member",
+  roleOption: "member|",
 };
 
 const emptyTaskForm = {
@@ -78,9 +78,33 @@ const emptyProjectSettingsForm = {
   description: "",
 };
 
+const emptyCustomRoleForm = {
+  name: "",
+  permissionRole: "member",
+};
+
 const toSafeNumber = (value, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const getDefaultRoleTitle = (role = "member") => (role === "admin" ? "Admin" : "Member");
+
+const getDisplayRole = (entry = {}) =>
+  entry.displayRole || entry.roleTitle || getDefaultRoleTitle(entry.role);
+
+const createRoleOptionValue = (role = "member", roleTitle = "") =>
+  `${role === "admin" ? "admin" : "member"}|${(roleTitle || "").trim()}`;
+
+const parseRoleOptionValue = (value = "member|") => {
+  const [rolePart = "member", ...titleParts] = value.split("|");
+  const role = rolePart === "admin" ? "admin" : "member";
+  const roleTitle = titleParts.join("|").trim();
+
+  return {
+    role,
+    roleTitle,
+  };
 };
 
 const normalizeStatus = (status) => {
@@ -166,7 +190,13 @@ const normalizeDashboardData = (data = {}) => {
     summary: normalizeSummary(data.summary, myTasks),
     myTasks,
     overdueTasks,
-    memberAnalytics: Array.isArray(data.memberAnalytics) ? data.memberAnalytics : [],
+    memberAnalytics: Array.isArray(data.memberAnalytics)
+      ? data.memberAnalytics.map((member) => ({
+          ...member,
+          displayRole: getDisplayRole(member),
+          roleTitle: member.roleTitle || "",
+        }))
+      : [],
     projectAnalytics: Array.isArray(data.projectAnalytics)
       ? data.projectAnalytics.map((project) => ({
           ...project,
@@ -184,8 +214,15 @@ const normalizeDashboardData = (data = {}) => {
 
 const normalizeProject = (project = {}) => ({
   ...project,
+  displayRole: getDisplayRole(project),
   memberCount: toSafeNumber(project.memberCount),
   summary: normalizeSummary(project.summary),
+});
+
+const normalizeMember = (member = {}) => ({
+  ...member,
+  displayRole: getDisplayRole(member),
+  roleTitle: member.roleTitle || "",
 });
 
 const normalizeProjectDetail = (project = {}) => {
@@ -193,9 +230,26 @@ const normalizeProjectDetail = (project = {}) => {
 
   return {
     ...project,
+    customRoles: Array.isArray(project.customRoles) ? project.customRoles : [],
     description: project.description || "",
-    memberAnalytics: Array.isArray(project.memberAnalytics) ? project.memberAnalytics : [],
-    members: Array.isArray(project.members) ? project.members : [],
+    displayRole: getDisplayRole(project),
+    roleOptions: Array.isArray(project.roleOptions)
+      ? project.roleOptions.map((option) => ({
+          ...option,
+          value: option.value || createRoleOptionValue(option.permissionRole, option.roleTitle),
+        }))
+      : [
+          { label: "Admin", permissionRole: "admin", roleTitle: "", value: createRoleOptionValue("admin") },
+          { label: "Member", permissionRole: "member", roleTitle: "", value: createRoleOptionValue("member") },
+        ],
+    memberAnalytics: Array.isArray(project.memberAnalytics)
+      ? project.memberAnalytics.map((member) => ({
+          ...member,
+          displayRole: getDisplayRole(member),
+          roleTitle: member.roleTitle || "",
+        }))
+      : [],
+    members: Array.isArray(project.members) ? project.members.map(normalizeMember) : [],
     recentActivity: Array.isArray(project.recentActivity) ? project.recentActivity : [],
     summary: normalizeSummary(project.summary, tasks),
     tasks,
@@ -214,6 +268,7 @@ function App() {
   const [projectForm, setProjectForm] = useState(emptyProjectForm);
   const [projectSettingsForm, setProjectSettingsForm] = useState(emptyProjectSettingsForm);
   const [memberForm, setMemberForm] = useState(emptyMemberForm);
+  const [customRoleForm, setCustomRoleForm] = useState(emptyCustomRoleForm);
   const [taskForm, setTaskForm] = useState(emptyTaskForm);
   const [authLoading, setAuthLoading] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(true);
@@ -302,6 +357,7 @@ function App() {
     setProjectForm(emptyProjectForm);
     setProjectSettingsForm(emptyProjectSettingsForm);
     setMemberForm(emptyMemberForm);
+    setCustomRoleForm(emptyCustomRoleForm);
     setTaskForm(emptyTaskForm);
     setActiveTab("dashboard");
     localStorage.removeItem(TOKEN_KEY);
@@ -406,6 +462,14 @@ function App() {
     }));
   };
 
+  const handleCustomRoleInput = (event) => {
+    const { name, value } = event.target;
+    setCustomRoleForm((current) => ({
+      ...current,
+      [name]: value,
+    }));
+  };
+
   const handleTaskInput = (event) => {
     const { name, value } = event.target;
     setTaskForm((current) => ({
@@ -452,15 +516,51 @@ function App() {
     }
 
     try {
+      const resolvedRole = parseRoleOptionValue(memberForm.roleOption);
+
       await request(`/projects/${selectedProjectId}/members`, {
         method: "POST",
         token,
-        body: memberForm,
+        body: {
+          email: memberForm.email,
+          ...resolvedRole,
+        },
       });
 
       setMemberForm(emptyMemberForm);
       await refreshWorkspace(token, selectedProjectId);
       pushToast("Member added successfully.");
+    } catch (error) {
+      pushToast(error.message, "error");
+    }
+  };
+
+  const handleCreateCustomRole = async (event) => {
+    event.preventDefault();
+
+    if (!selectedProjectId) {
+      pushToast("Select a project first.", "error");
+      return;
+    }
+
+    if (!customRoleForm.name.trim()) {
+      pushToast("Custom role name is required.", "error");
+      return;
+    }
+
+    try {
+      await request(`/projects/${selectedProjectId}/roles`, {
+        method: "POST",
+        token,
+        body: {
+          name: customRoleForm.name,
+          permissionRole: customRoleForm.permissionRole,
+        },
+      });
+
+      setCustomRoleForm(emptyCustomRoleForm);
+      await refreshWorkspace(token, selectedProjectId);
+      pushToast("Custom role created successfully.");
     } catch (error) {
       pushToast(error.message, "error");
     }
@@ -577,6 +677,28 @@ function App() {
     }
   };
 
+  const handleUpdateMember = async (memberId, payload) => {
+    if (!selectedProjectId) {
+      pushToast("Select a project first.", "error");
+      return;
+    }
+
+    try {
+      const resolvedRole = parseRoleOptionValue(payload.roleOption);
+
+      await request(`/projects/${selectedProjectId}/members/${memberId}`, {
+        method: "PATCH",
+        token,
+        body: resolvedRole,
+      });
+
+      await refreshWorkspace(token, selectedProjectId);
+      pushToast("Member role updated successfully.");
+    } catch (error) {
+      pushToast(error.message, "error");
+    }
+  };
+
   const handleStatusChange = async (taskId, status) => {
     try {
       const data = await request(`/tasks/${taskId}`, {
@@ -634,7 +756,7 @@ function App() {
               <div className="topbar-mark">TP</div>
               <div>
                 <p className="topbar-name">TaskPilot</p>
-                <p className="topbar-subtitle">Full-stack team task manager</p>
+                <p className="topbar-subtitle">Team task manager</p>
               </div>
             </div>
 
@@ -690,8 +812,7 @@ function App() {
 
             <div className="topbar-actions">
               <div className="topbar-chips">
-                <span className="topbar-chip">JWT auth</span>
-                <span className="topbar-chip">Role-based access</span>
+                <span className="topbar-chip">Admin and member roles</span>
                 <span className="topbar-chip">Deadline tracking</span>
               </div>
               <button
@@ -751,7 +872,7 @@ function App() {
             <div className="topbar-mark">TP</div>
             <div>
               <p className="topbar-name">TaskPilot</p>
-              <p className="topbar-subtitle">Full-stack team task manager</p>
+              <p className="topbar-subtitle">Team task manager</p>
             </div>
           </div>
 
@@ -784,9 +905,6 @@ function App() {
               <div className="workspace-header-text">
                 <p className="eyebrow">Operations Console</p>
                 <h2>Manage projects, assign work, and track progress clearly</h2>
-                <p className="subtle workspace-copy">
-                  Use the dashboard for quick visibility and the projects tab for day-to-day coordination.
-                </p>
               </div>
 
               {user ? (
@@ -827,11 +945,14 @@ function App() {
               <DashboardView dashboard={dashboard} />
             ) : (
               <ProjectsView
+                customRoleForm={customRoleForm}
                 currentUserId={user?.id}
                 memberForm={memberForm}
                 onAddMember={handleAddMember}
+                onCreateCustomRole={handleCreateCustomRole}
                 onCreateProject={handleCreateProject}
                 onCreateTask={handleCreateTask}
+                onCustomRoleInput={handleCustomRoleInput}
                 onDeleteProject={handleDeleteProject}
                 onDeleteTask={handleDeleteTask}
                 onMemberInput={handleMemberInput}
@@ -841,6 +962,7 @@ function App() {
                 onSelectProject={handleProjectSelect}
                 onStatusChange={handleStatusChange}
                 onTaskInput={handleTaskInput}
+                onUpdateMember={handleUpdateMember}
                 onUpdateProject={handleUpdateProject}
                 projectDetail={projectDetail}
                 projectForm={projectForm}

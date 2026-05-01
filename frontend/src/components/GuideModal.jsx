@@ -33,7 +33,6 @@ function GuideModal({
   }
 
   const firstName = user?.name?.split(" ")[0] || "there";
-  const currentRole = selectedProject?.role || "member";
   const projectCount = projects.length;
   const nextStep = !user
     ? "Create your account first, then sign in to open your workspace."
@@ -84,7 +83,7 @@ function GuideModal({
           </div>
           <div className="guide-status-chip tone-lavender">
             <span>Current role</span>
-            <strong>{selectedProject?.role || "Guest"}</strong>
+            <strong>{selectedProject?.displayRole || selectedProject?.role || "Guest"}</strong>
           </div>
         </div>
 

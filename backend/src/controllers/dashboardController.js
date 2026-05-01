@@ -1,6 +1,7 @@
 const Activity = require("../models/Activity");
 const Project = require("../models/Project");
 const Task = require("../models/Task");
+const { resolveProjectRoleTitle } = require("../utils/projectRoles");
 const {
   buildTaskSummary,
   isTaskCompleted,
@@ -43,6 +44,8 @@ const getDashboard = async (req, res, next) => {
             name: member.user.name,
             email: member.user.email,
             role: member.role,
+            roleTitle: member.roleTitle || "",
+            displayRole: resolveProjectRoleTitle(member.role, member.roleTitle),
           });
         }
       });
@@ -70,6 +73,8 @@ const getDashboard = async (req, res, next) => {
           id: member.id,
           name: member.name,
           role: member.role,
+          roleTitle: member.roleTitle || "",
+          displayRole: member.displayRole || resolveProjectRoleTitle(member.role, member.roleTitle),
           assignedTasks: assignedTasks.length,
           completedTasks,
           openTasks: assignedTasks.length - completedTasks,

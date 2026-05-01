@@ -12,7 +12,7 @@ function HeroPanel({ projectCount = 0, selectedProject, summary, user }) {
       <section className="story-panel public-story-panel">
         <div className="hero-badge-row">
           <span className="hero-badge">Team Task Manager</span>
-          <span className="hero-badge ghost">Full-stack project</span>
+          <span className="hero-badge ghost">Built for collaborative teams</span>
         </div>
 
         <div className="brand-block hero-brand">
@@ -100,7 +100,7 @@ function HeroPanel({ projectCount = 0, selectedProject, summary, user }) {
         </article>
         <article className="overview-stat tone-lavender">
           <span>Current role</span>
-          <strong>{selectedProject?.role || "None"}</strong>
+          <strong>{selectedProject?.displayRole || selectedProject?.role || "None"}</strong>
         </article>
       </div>
 

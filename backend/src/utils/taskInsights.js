@@ -1,3 +1,5 @@
+const { resolveProjectRoleTitle } = require("./projectRoles");
+
 const normalizeTaskStatus = (status) => {
   if (status === "done" || status === "completed") {
     return "completed";
@@ -165,6 +167,8 @@ const buildMemberAnalytics = (members, tasks) =>
         id: member.id,
         name: member.name,
         role: member.role,
+        roleTitle: member.roleTitle || "",
+        displayRole: member.displayRole || resolveProjectRoleTitle(member.role, member.roleTitle),
         assignedTasks: memberTasks.length,
         completedTasks,
         openTasks: memberTasks.length - completedTasks,

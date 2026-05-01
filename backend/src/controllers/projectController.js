@@ -6,6 +6,18 @@ const User = require("../models/User");
 const { logActivity } = require("../services/activityService");
 const { getProjectForUser } = require("../utils/projectAccess");
 const {
+  DEFAULT_ROLE_TITLES,
+  getCustomRoleByName,
+  getDefaultRoleTitle,
+  getNormalizedCustomRoles,
+  getProjectRoleOptions,
+  matchesRoleName,
+  normalizeCustomRoleName,
+  normalizePermissionRole,
+  resolveProjectRoleTitle,
+  roleTitleExists,
+} = require("../utils/projectRoles");
+const {
   buildMemberAnalytics,
   buildTaskSummary,
   serializeActivity,
@@ -17,6 +29,8 @@ const serializeMember = (member) => ({
   name: member.user.name,
   email: member.user.email,
   role: member.role,
+  roleTitle: member.roleTitle || "",
+  displayRole: resolveProjectRoleTitle(member.role, member.roleTitle),
 });
 
 const ensureAdmin = (access, res, message) => {
@@ -26,6 +40,42 @@ const ensureAdmin = (access, res, message) => {
 
   res.status(403);
   throw new Error(message);
+};
+
+const validateProjectRoleTitle = (project, role, roleTitle, res) => {
+  const normalizedTitle = normalizeCustomRoleName(roleTitle);
+
+  if (!normalizedTitle) {
+    return "";
+  }
+
+  if (!roleTitleExists(project, normalizedTitle)) {
+    res.status(400);
+    throw new Error("Define the custom project role first before assigning it.");
+  }
+
+  if (matchesRoleName(normalizedTitle, DEFAULT_ROLE_TITLES.admin) && role !== "admin") {
+    res.status(400);
+    throw new Error("Admin title must use admin access.");
+  }
+
+  if (matchesRoleName(normalizedTitle, DEFAULT_ROLE_TITLES.member) && role !== "member") {
+    res.status(400);
+    throw new Error("Member title must use member access.");
+  }
+
+  const customRole = getCustomRoleByName(project, normalizedTitle);
+
+  if (customRole && customRole.permissionRole !== role) {
+    res.status(400);
+    throw new Error(`The role ${customRole.name} must use ${customRole.permissionRole} access.`);
+  }
+
+  if (matchesRoleName(normalizedTitle, getDefaultRoleTitle(role))) {
+    return "";
+  }
+
+  return normalizedTitle;
 };
 
 const getProjects = async (req, res, next) => {
@@ -52,15 +102,16 @@ const getProjects = async (req, res, next) => {
       projects: projects.map((project) => {
         const projectTasks = tasksByProject.get(project._id.toString()) || [];
         const summary = buildTaskSummary(projectTasks);
-        const role = project.members.find(
+        const roleEntry = project.members.find(
           (member) => member.user._id.toString() === req.user._id.toString()
-        )?.role;
+        );
 
         return {
           id: project._id,
           name: project.name,
           description: project.description,
-          role,
+          role: roleEntry?.role || "member",
+          displayRole: resolveProjectRoleTitle(roleEntry?.role, roleEntry?.roleTitle),
           memberCount: project.members.length,
           summary,
           updatedAt: project.updatedAt,
@@ -90,8 +141,10 @@ const createProject = async (req, res, next) => {
         {
           user: req.user._id,
           role: "admin",
+          roleTitle: "",
         },
       ],
+      customRoles: [],
     });
 
     await logActivity({
@@ -142,6 +195,9 @@ const getProjectDetails = async (req, res, next) => {
         name: access.project.name,
         description: access.project.description,
         role: access.role,
+        displayRole: access.displayRole,
+        roleOptions: getProjectRoleOptions(access.project),
+        customRoles: getNormalizedCustomRoles(access.project),
         members,
         summary: buildTaskSummary(tasks),
         memberAnalytics: buildMemberAnalytics(members, tasks),
@@ -236,9 +292,9 @@ const addProjectMember = async (req, res, next) => {
 
     ensureAdmin(access, res, "Only project admins can add members.");
 
-    const { email, role = "member" } = req.body;
+    const { email, role = "member", roleTitle = "" } = req.body;
     const normalizedEmail = email?.trim().toLowerCase();
-    const normalizedRole = role === "admin" ? "admin" : role === "member" ? "member" : null;
+    const normalizedRole = normalizePermissionRole(role);
 
     if (!normalizedEmail) {
       res.status(400);
@@ -249,6 +305,13 @@ const addProjectMember = async (req, res, next) => {
       res.status(400);
       throw new Error("Role must be either admin or member.");
     }
+
+    const normalizedRoleTitle = validateProjectRoleTitle(
+      access.project,
+      normalizedRole,
+      roleTitle,
+      res
+    );
 
     const memberUser = await User.findOne({ email: normalizedEmail });
 
@@ -269,19 +332,172 @@ const addProjectMember = async (req, res, next) => {
     access.project.members.push({
       user: memberUser._id,
       role: normalizedRole,
+      roleTitle: normalizedRoleTitle,
     });
     await access.project.save();
     await access.project.populate("members.user", "name email");
 
+    const assignedRoleLabel = resolveProjectRoleTitle(normalizedRole, normalizedRoleTitle);
+    const roleSuffix = matchesRoleName(assignedRoleLabel, DEFAULT_ROLE_TITLES[normalizedRole])
+      ? assignedRoleLabel
+      : `${assignedRoleLabel} (${normalizedRole} access)`;
+
     await logActivity({
       actor: req.user._id,
-      message: `${req.user.name} added ${memberUser.name} to ${access.project.name} as ${normalizedRole}.`,
+      message: `${req.user.name} added ${memberUser.name} to ${access.project.name} as ${roleSuffix}.`,
       project: access.project._id,
       type: "member_added",
     });
 
     res.status(201).json({
       message: "Member added successfully.",
+      members: access.project.members.map(serializeMember),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const createCustomRole = async (req, res, next) => {
+  try {
+    const access = await getProjectForUser(req.params.projectId, req.user._id);
+
+    if (!access) {
+      res.status(404);
+      throw new Error("Project not found or access denied.");
+    }
+
+    ensureAdmin(access, res, "Only project admins can define custom roles.");
+
+    const normalizedRoleName = normalizeCustomRoleName(req.body?.name);
+    const permissionRole = normalizePermissionRole(req.body?.permissionRole || "member");
+
+    if (!normalizedRoleName) {
+      res.status(400);
+      throw new Error("Role name is required.");
+    }
+
+    if (!permissionRole) {
+      res.status(400);
+      throw new Error("Permission base must be admin or member.");
+    }
+
+    if (
+      matchesRoleName(normalizedRoleName, DEFAULT_ROLE_TITLES.admin) ||
+      matchesRoleName(normalizedRoleName, DEFAULT_ROLE_TITLES.member)
+    ) {
+      res.status(400);
+      throw new Error("Admin and Member already exist as built-in access roles.");
+    }
+
+    const alreadyExists = getNormalizedCustomRoles(access.project).some((roleEntry) =>
+      matchesRoleName(roleEntry.name, normalizedRoleName)
+    );
+
+    if (alreadyExists) {
+      res.status(409);
+      throw new Error("That custom role already exists for this project.");
+    }
+
+    access.project.customRoles.push({
+      name: normalizedRoleName,
+      permissionRole,
+    });
+    await access.project.save();
+
+    await logActivity({
+      actor: req.user._id,
+      message: `${req.user.name} created the custom role ${normalizedRoleName} in ${access.project.name}.`,
+      project: access.project._id,
+      type: "project_updated",
+    });
+
+    res.status(201).json({
+      message: "Custom role created successfully.",
+      roleOptions: getProjectRoleOptions(access.project),
+      customRoles: getNormalizedCustomRoles(access.project),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const updateProjectMember = async (req, res, next) => {
+  try {
+    const access = await getProjectForUser(req.params.projectId, req.user._id);
+
+    if (!access) {
+      res.status(404);
+      throw new Error("Project not found or access denied.");
+    }
+
+    ensureAdmin(access, res, "Only project admins can update member roles.");
+
+    const { memberId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(memberId)) {
+      res.status(404);
+      throw new Error("Member not found.");
+    }
+
+    const memberEntry = access.project.members.find(
+      (member) => member.user._id.toString() === memberId.toString()
+    );
+
+    if (!memberEntry) {
+      res.status(404);
+      throw new Error("Member not found in this project.");
+    }
+
+    const nextRole =
+      req.body?.role === undefined ? memberEntry.role : normalizePermissionRole(req.body.role);
+
+    if (!nextRole) {
+      res.status(400);
+      throw new Error("Role must be either admin or member.");
+    }
+
+    if (access.project.owner.toString() === memberId.toString() && nextRole !== "admin") {
+      res.status(400);
+      throw new Error("Project owner must remain an admin.");
+    }
+
+    const adminCount = access.project.members.filter((member) => member.role === "admin").length;
+
+    if (memberEntry.role === "admin" && nextRole !== "admin" && adminCount <= 1) {
+      res.status(400);
+      throw new Error("At least one admin must remain on the project.");
+    }
+
+    const nextRoleTitle =
+      req.body?.roleTitle === undefined
+        ? memberEntry.roleTitle || ""
+        : validateProjectRoleTitle(access.project, nextRole, req.body.roleTitle, res);
+
+    const currentDisplayRole = resolveProjectRoleTitle(memberEntry.role, memberEntry.roleTitle);
+    const nextDisplayRole = resolveProjectRoleTitle(nextRole, nextRoleTitle);
+
+    if (memberEntry.role === nextRole && (memberEntry.roleTitle || "") === nextRoleTitle) {
+      return res.json({
+        message: "Member role is already up to date.",
+        members: access.project.members.map(serializeMember),
+      });
+    }
+
+    memberEntry.role = nextRole;
+    memberEntry.roleTitle = nextRoleTitle;
+    await access.project.save();
+    await access.project.populate("members.user", "name email");
+
+    await logActivity({
+      actor: req.user._id,
+      message: `${req.user.name} updated ${memberEntry.user.name}'s role from ${currentDisplayRole} to ${nextDisplayRole}.`,
+      project: access.project._id,
+      type: "member_updated",
+    });
+
+    res.json({
+      message: "Member role updated successfully.",
       members: access.project.members.map(serializeMember),
     });
   } catch (error) {
@@ -363,10 +579,12 @@ const removeProjectMember = async (req, res, next) => {
 
 module.exports = {
   addProjectMember,
+  createCustomRole,
   createProject,
   deleteProject,
   getProjectDetails,
   getProjects,
   removeProjectMember,
+  updateProjectMember,
   updateProject,
 };
