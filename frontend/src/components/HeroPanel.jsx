@@ -1,5 +1,7 @@
 function HeroPanel({ projectCount = 0, selectedProject, summary, user }) {
-  const firstName = user?.name?.split(" ")[0] || "there";
+  const rawName = user?.name?.trim() || "";
+  const baseName = rawName.includes("@") ? rawName.split("@")[0] : rawName.split(" ")[0];
+  const firstName = baseName ? baseName.slice(0, 18) : "there";
   const hasProjects = projectCount > 0;
   const selectedSummary = selectedProject?.summary || {
     overdueTasks: 0,
@@ -78,7 +80,7 @@ function HeroPanel({ projectCount = 0, selectedProject, summary, user }) {
       </div>
 
       <p className="eyebrow">Quick Summary</p>
-      <h2>{hasProjects ? `Welcome back, ${firstName}` : `Hi ${firstName}, start your first project`}</h2>
+      <h2>{hasProjects ? `Welcome back, ${firstName}` : "Start your first project"}</h2>
       <p className="lead">
         {hasProjects
           ? "Use the dashboard for visibility and the projects tab for members, assignments, and status updates."

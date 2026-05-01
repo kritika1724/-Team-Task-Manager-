@@ -32,7 +32,9 @@ function GuideModal({
     return null;
   }
 
-  const firstName = user?.name?.split(" ")[0] || "there";
+  const rawName = user?.name?.trim() || "";
+  const baseName = rawName.includes("@") ? rawName.split("@")[0] : rawName.split(" ")[0];
+  const firstName = baseName ? baseName.slice(0, 18) : "there";
   const projectCount = projects.length;
   const nextStep = !user
     ? "Create your account first, then sign in to open your workspace."
